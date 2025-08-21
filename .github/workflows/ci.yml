@@ -1,14 +1,12 @@
-on:
-jobs:
 name: Backend CI
 
-
+on:
   pull_request:
     branches: [dev, staging, production]
   push:
     branches: [dev]
 
-
+  echo ""
   build-test:
     runs-on: ubuntu-latest
     steps:
@@ -25,9 +23,9 @@ name: Backend CI
         uses: actions/cache@v4
         with:
           path: ~/.m2/repository
-          key: maven-4{{ runner.os }}-4{{ hashFiles('**/pom.xml') }}
+          key: maven-${{ runner.os }}-${{ hashFiles('**/pom.xml') }}
           restore-keys: |
-            maven-4{{ runner.os }}-
+            maven-${{ runner.os }}-
 
       - name: Build with Maven
         run: mvn -B clean install
