@@ -1,0 +1,60 @@
+name: Deploy Backend to Amazon ECS
+
+on:
+  workflow_run:
+    workflows: ["Backend CI"] # Name of your CI workflow for backend
+    types:
+      - completed
+
+jobs:
+  deploy:
+    name: Deploy Backend
+    runs-on: ubuntu-latest
+    env:
+      AWS_ECR_REPOSITORY_NAME: ${{ env.ECR_REPOSITORY_NAME }}
+      AWS_ECS_CLUSTER_NAME: ${{ env.ECS_CLUSTER_NAME }}
+      AWS_ECS_SERVICE_NAME: ${{ env.ECS_SERVICE_NAME }}
+      AWS_ECS_TASK_DEFINITION: ${{ env.ECS_TASK_DEFINITION }}
+      AWS_ECS_TASK_DEFINITION_CONTAINER_NAME: ${{ env.ECS_TASK_DEFINITION_CONTAINER_NAME }}
+      AWS_DEFAULT_REGION: eu-west-1
+      IMAGE_TAG: ${{ github.sha }}
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v3
+
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v3
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ env.AWS_DEFAULT_REGION }}
+
+    - name: Login to Amazon ECR
+      id: login-ecr
+      uses: aws-actions/amazon-ecr-login@v2
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Build, tag, and push image to Amazon ECR
+      run: |
+        docker buildx build --platform linux/amd64,linux/arm64 \
+          -t ${{ steps.login-ecr.outputs.registry }}/${{ env.AWS_ECR_REPOSITORY_NAME }}:${{ env.IMAGE_TAG }} \
+          --push .
+
+    - name: Fill in the new image ID in the Amazon ECS task definition
+      id: task-def
+      uses: aws-actions/amazon-ecs-render-task-definition@v1
+      with:
+        task-definition: ${{ env.AWS_ECS_TASK_DEFINITION }}
+        container-name: ${{ env.AWS_ECS_TASK_DEFINITION_CONTAINER_NAME }}
+        image: ${{ steps.login-ecr.outputs.registry }}/${{ env.AWS_ECR_REPOSITORY_NAME }}:${{ env.IMAGE_TAG }}
+
+    - name: Deploy Amazon ECS task definition to ECS service
+      uses: aws-actions/amazon-ecs-deploy-task-definition@v1
+      with:
+        task-definition: ${{ steps.task-def.outputs.task-definition }}
+        service: ${{ env.AWS_ECS_SERVICE_NAME }}
+        cluster: ${{ env.AWS_ECS_CLUSTER_NAME }}
+        wait-for-service-stability: true
