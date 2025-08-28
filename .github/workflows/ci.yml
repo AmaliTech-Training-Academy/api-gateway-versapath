@@ -1,4 +1,4 @@
-name: CI $REPO_BASE
+name: CI ${REPO_BASE}
 
 on:
   pull_request:
