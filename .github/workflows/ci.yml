@@ -28,7 +28,7 @@ jobs:
       - name: Build with Maven
         run: mvn -B clean install
 
-      - name: Run tests
+      - name: Running Tests
         run: mvn test
 
       - name: Upload test results
