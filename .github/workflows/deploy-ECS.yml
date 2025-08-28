@@ -50,7 +50,7 @@ jobs:
         docker push $REGISTRY/$REPOSITORY:$IMAGE_TAG
         docker push $REGISTRY/$REPOSITORY:latest
 
-    - name: Render new ECS task definition
+    - name: Render a new ECS task definition
       id: render-task-def
       uses: aws-actions/amazon-ecs-render-task-definition@v1
       with:
