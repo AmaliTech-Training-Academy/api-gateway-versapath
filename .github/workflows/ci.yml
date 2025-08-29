@@ -1,4 +1,4 @@
-name: Backend CI
+name: CI api-gateway-versapath
 
 on:
   pull_request:
