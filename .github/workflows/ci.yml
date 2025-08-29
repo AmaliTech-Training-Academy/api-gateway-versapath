@@ -1,8 +1,10 @@
-name: CI ${REPO_BASE}
+name: CI api-gateway-versapath
 
 on:
   pull_request:
     branches: [dev, staging, production]
+  push:
+    branches: [dev]
 
 jobs:
   build-test:
@@ -28,7 +30,7 @@ jobs:
       - name: Build with Maven
         run: mvn -B clean install
 
-      - name: Running Tests
+      - name: Run tests
         run: mvn test
 
       - name: Upload test results
