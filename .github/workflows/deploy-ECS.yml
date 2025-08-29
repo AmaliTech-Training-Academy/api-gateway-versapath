@@ -17,7 +17,7 @@ jobs:
       AWS_ECS_CLUSTER_NAME: versapath-cluster
       AWS_ECS_SERVICE_NAME: versapath-api-gateway
       AWS_DEFAULT_REGION: eu-west-1
-      IMAGE_TAG: ${{ github.sha }}
+      IMAGE_TAG: ${{ substr(github.sha, 0, 7) }}
 
     steps:
     - name: Checkout
