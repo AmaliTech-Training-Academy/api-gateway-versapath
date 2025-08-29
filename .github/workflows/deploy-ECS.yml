@@ -10,7 +10,7 @@ on:
 
 jobs:
   deploy:
-    name: Deploy api-gateway
+    name: Deploying api-gateway
     runs-on: ubuntu-latest
     env:
       AWS_ECR_REPOSITORY_NAME: versapath/api-gateway
