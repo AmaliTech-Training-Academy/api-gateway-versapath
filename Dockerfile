@@ -19,7 +19,7 @@ FROM bellsoft/liberica-openjre-debian:21-cds
 
 # Add metadata
 LABEL maintainer="AmaliTech Training Academy" \
-    description="Api-gateway" \
+    description="ApiGateway" \
     version="1.0"
 
 
