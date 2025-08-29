@@ -52,18 +52,54 @@ jobs:
         docker push $REGISTRY/$REPOSITORY:${{ env.IMAGE_TAG }}
         docker push $REGISTRY/$REPOSITORY:latest
 
-    - name: Render a new ECS task definition
-      id: render-task-def
-      uses: aws-actions/amazon-ecs-render-task-definition@v1
-      with:
-        task-definition: .aws/ecs-task-def.json # Path to your ECS task definition JSON file
-        container-name: api-gateway # Must match container name in your ECS task definition
-        image: ${{ steps.login-ecr.outputs.registry }}/${{ env.AWS_ECR_REPOSITORY_NAME }}:${{ env.IMAGE_TAG }}
+    # TERRAFORM-COMPATIBLE APPROACH: Only update image, preserve infrastructure config
+    - name: Update ECS Service with new image (Terraform-compatible)
+      run: |
+        echo "Updating ECS service with new image..."
+        # Get current task definition ARN
+        CURRENT_TASK_DEF=$(aws ecs describe-services \
+          --cluster ${{ env.AWS_ECS_CLUSTER_NAME }} \
+          --services ${{ env.AWS_ECS_SERVICE_NAME }} \
+          --query 'services[0].taskDefinition' \
+          --output text)
+        
+        echo "Current task definition: $CURRENT_TASK_DEF"
+        
+        # Get the current task definition family and revision
+        FAMILY=$(echo $CURRENT_TASK_DEF | cut -d: -f6 | cut -d/ -f2)
+        
+        # Get current task definition JSON
+        aws ecs describe-task-definition \
+          --task-definition $CURRENT_TASK_DEF \
+          --query 'taskDefinition' > current-task-def.json
+        
+        # Update image in the JSON while preserving all other configurations
+        NEW_IMAGE="${{ steps.login-ecr.outputs.registry }}/${{ env.AWS_ECR_REPOSITORY_NAME }}:${{ env.IMAGE_TAG }}"
+        jq --arg image "$NEW_IMAGE" '.containerDefinitions[0].image = $image' current-task-def.json > updated-task-def.json
+        
+        # Remove runtime-specific fields that shouldn't be in registration
+        jq 'del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .placementConstraints, .compatibilities, .registeredAt, .registeredBy)' updated-task-def.json > clean-task-def.json
+        
+        # Register new task definition
+        NEW_TASK_DEF_ARN=$(aws ecs register-task-definition \
+          --cli-input-json file://clean-task-def.json \
+          --query 'taskDefinition.taskDefinitionArn' \
+          --output text)
+        
+        echo "New task definition registered: $NEW_TASK_DEF_ARN"
+        
+        # Update service to use new task definition
+        aws ecs update-service \
+          --cluster ${{ env.AWS_ECS_CLUSTER_NAME }} \
+          --service ${{ env.AWS_ECS_SERVICE_NAME }} \
+          --task-definition $NEW_TASK_DEF_ARN
+        
+        echo "Service updated with new task definition"
 
-    - name: Deploy new ECS task definition revision
-      uses: aws-actions/amazon-ecs-deploy-task-definition@v1
-      with:
-        task-definition: ${{ steps.render-task-def.outputs.task-definition }}
-        service: ${{ env.AWS_ECS_SERVICE_NAME }}
-        cluster: ${{ env.AWS_ECS_CLUSTER_NAME }}
-        wait-for-service-stability: true
+    - name: Wait for deployment to complete
+      run: |
+        echo "Waiting for service to stabilize..."
+        aws ecs wait services-stable \
+          --cluster ${{ env.AWS_ECS_CLUSTER_NAME }} \
+          --services ${{ env.AWS_ECS_SERVICE_NAME }}
+        echo "Deployment completed successfully!"
