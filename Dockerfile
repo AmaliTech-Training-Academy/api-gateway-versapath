@@ -22,9 +22,6 @@ LABEL maintainer="AmaliTech Training Academy" \
     description="Api-gateway" \
     version="1.0"
 
-# Set default environment variables (can be overridden)
-ENV SPRING_PROFILES_ACTIVE=production
-ENV SERVER_PORT=8030
 
 # Create a non-root user
 RUN useradd -r -u 1001 -g root apigateway
@@ -36,7 +33,7 @@ COPY --from=builder --chown=apigateway:root /build/target/*.jar ./application.ja
 
 # Configure container
 USER 1001
-EXPOSE 8030
+EXPOSE 8080
 
 # Use the standard JAR execution
 ENTRYPOINT ["java", "-XX:+UseContainerSupport", "-XX:MaxRAMPercentage=75.0", "-Djava.security.egd=file:/dev/./urandom", "-jar", "application.jar"]
