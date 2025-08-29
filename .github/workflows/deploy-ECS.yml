@@ -17,11 +17,14 @@ jobs:
       AWS_ECS_CLUSTER_NAME: versapath-cluster
       AWS_ECS_SERVICE_NAME: versapath-api-gateway
       AWS_DEFAULT_REGION: eu-west-1
-      IMAGE_TAG: ${{ substr(github.sha, 0, 7) }}
 
     steps:
     - name: Checkout
       uses: actions/checkout@v4
+
+    - name: Set image tag
+      id: vars
+      run: echo "IMAGE_TAG=$(git rev-parse --short HEAD)" >> $GITHUB_ENV
 
     - name: Configure AWS credentials
       uses: aws-actions/configure-aws-credentials@v4
@@ -41,13 +44,12 @@ jobs:
       env:
         REGISTRY: ${{ steps.login-ecr.outputs.registry }}
         REPOSITORY: ${{ env.AWS_ECR_REPOSITORY_NAME }}
-        IMAGE_TAG: ${{ env.IMAGE_TAG }}
       run: |
         echo "Building Docker image..."
-        docker build -t $REGISTRY/$REPOSITORY:$IMAGE_TAG .
-        docker tag $REGISTRY/$REPOSITORY:$IMAGE_TAG $REGISTRY/$REPOSITORY:latest
+        docker build -t $REGISTRY/$REPOSITORY:${{ env.IMAGE_TAG }} .
+        docker tag $REGISTRY/$REPOSITORY:${{ env.IMAGE_TAG }} $REGISTRY/$REPOSITORY:latest
         echo "Pushing to ECR..."
-        docker push $REGISTRY/$REPOSITORY:$IMAGE_TAG
+        docker push $REGISTRY/$REPOSITORY:${{ env.IMAGE_TAG }}
         docker push $REGISTRY/$REPOSITORY:latest
 
     - name: Render a new ECS task definition
