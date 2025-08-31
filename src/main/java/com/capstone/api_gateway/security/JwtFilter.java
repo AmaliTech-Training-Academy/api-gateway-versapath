@@ -16,6 +16,9 @@ import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.security.Keys;
 import org.springframework.beans.factory.annotation.Value;
 import lombok.extern.slf4j.Slf4j;
+import com.capstone.api_gateway.dto.ApiResponseDto;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 
 import reactor.core.publisher.Mono;
 import javax.crypto.SecretKey;
@@ -27,6 +30,8 @@ public class JwtFilter implements GlobalFilter, Ordered {
 
     @Value("${JWT_SECRET}")
     private String jwtSecret;
+    
+    private final ObjectMapper objectMapper = new ObjectMapper();
 
     @Override
     public Mono<Void> filter(ServerWebExchange exchange, GatewayFilterChain chain) {
@@ -111,16 +116,22 @@ public class JwtFilter implements GlobalFilter, Ordered {
         response.setStatusCode(HttpStatus.UNAUTHORIZED);
         response.getHeaders().add("Content-Type", "application/json");
 
-        String body = """
-              {
-                  "success": false,
-                  "message": "Authentication required",
-                  "errors": ["Invalid or missing authentication token"]
-              }
-              """;
+        ApiResponseDto<Void> errorResponse = ApiResponseDto.error(
+            "Invalid or missing authentication token",
+            "Authentication required"
+        );
 
-        DataBuffer buffer = response.bufferFactory().wrap(body.getBytes(StandardCharsets.UTF_8));
-        return response.writeWith(Mono.just(buffer));
+        try {
+            String body = objectMapper.writeValueAsString(errorResponse);
+            DataBuffer buffer = response.bufferFactory().wrap(body.getBytes(StandardCharsets.UTF_8));
+            return response.writeWith(Mono.just(buffer));
+        } catch (JsonProcessingException e) {
+            log.error("Error serializing unauthorized response: {}", e.getMessage());
+            // Fallback to simple response
+            String fallbackBody = "{\"success\":false,\"message\":\"Authentication required\"}";
+            DataBuffer buffer = response.bufferFactory().wrap(fallbackBody.getBytes(StandardCharsets.UTF_8));
+            return response.writeWith(Mono.just(buffer));
+        }
     }
 
     @Override
