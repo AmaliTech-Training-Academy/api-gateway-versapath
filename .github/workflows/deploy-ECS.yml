@@ -56,29 +56,36 @@ jobs:
     - name: Update ECS Service with new image (Terraform-compatible)
       run: |
         echo "Updating ECS service with new image..."
-        # Get current task definition ARN
+        
+        # Check if service exists and get current task definition
         CURRENT_TASK_DEF=$(aws ecs describe-services \
           --cluster ${{ env.AWS_ECS_CLUSTER_NAME }} \
           --services ${{ env.AWS_ECS_SERVICE_NAME }} \
           --query 'services[0].taskDefinition' \
-          --output text)
+          --output text 2>/dev/null || echo "NONE")
         
-        echo "Current task definition: $CURRENT_TASK_DEF"
-        
-        # Get the current task definition family and revision
-        FAMILY=$(echo $CURRENT_TASK_DEF | cut -d: -f6 | cut -d/ -f2)
-        
-        # Get current task definition JSON
-        aws ecs describe-task-definition \
-          --task-definition $CURRENT_TASK_DEF \
-          --query 'taskDefinition' > current-task-def.json
-        
-        # Update image in the JSON while preserving all other configurations
-        NEW_IMAGE="${{ steps.login-ecr.outputs.registry }}/${{ env.AWS_ECR_REPOSITORY_NAME }}:${{ env.IMAGE_TAG }}"
-        jq --arg image "$NEW_IMAGE" '.containerDefinitions[0].image = $image' current-task-def.json > updated-task-def.json
-        
-        # Remove runtime-specific fields that shouldn't be in registration
-        jq 'del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .placementConstraints, .compatibilities, .registeredAt, .registeredBy)' updated-task-def.json > clean-task-def.json
+        if [ "$CURRENT_TASK_DEF" != "NONE" ] && [ "$CURRENT_TASK_DEF" != "null" ]; then
+          echo "Using current AWS task definition: $CURRENT_TASK_DEF"
+          
+          # Get current task definition JSON from AWS
+          aws ecs describe-task-definition \
+            --task-definition $CURRENT_TASK_DEF \
+            --query 'taskDefinition' > current-task-def.json
+          
+          # Update image in the JSON while preserving all other configurations
+          NEW_IMAGE="${{ steps.login-ecr.outputs.registry }}/${{ env.AWS_ECR_REPOSITORY_NAME }}:${{ env.IMAGE_TAG }}"
+          jq --arg image "$NEW_IMAGE" '.containerDefinitions[0].image = $image' current-task-def.json > updated-task-def.json
+          
+          # Remove runtime-specific fields that shouldn't be in registration
+          jq 'del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .placementConstraints, .compatibilities, .registeredAt, .registeredBy)' updated-task-def.json > clean-task-def.json
+          
+        else
+          echo "No current task definition found in AWS, using local task definition as baseline"
+          
+          # Use our local updated task definition and update the image
+          NEW_IMAGE="${{ steps.login-ecr.outputs.registry }}/${{ env.AWS_ECR_REPOSITORY_NAME }}:${{ env.IMAGE_TAG }}"
+          jq --arg image "$NEW_IMAGE" '.containerDefinitions[0].image = $image' .aws/ecs-task-def.json > clean-task-def.json
+        fi
         
         # Register new task definition
         NEW_TASK_DEF_ARN=$(aws ecs register-task-definition \
@@ -88,7 +95,7 @@ jobs:
         
         echo "New task definition registered: $NEW_TASK_DEF_ARN"
         
-        # Update service to use new task definition
+        # Update service to use new task definition  
         aws ecs update-service \
           --cluster ${{ env.AWS_ECS_CLUSTER_NAME }} \
           --service ${{ env.AWS_ECS_SERVICE_NAME }} \
