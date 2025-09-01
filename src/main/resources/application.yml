@@ -3,6 +3,12 @@ spring:
     name: ${SPRING_APPLICATION_NAME}
   config:
     import: optional:configserver:${CONFIG_SERVER_URL}
+  data:
+    redis:
+      host: ${SPRING_REDIS_HOST:localhost}
+      port: ${SPRING_REDIS_PORT:6379}
+      password: ${SPRING_REDIS_PASSWORD:}
+      timeout: ${SPRING_REDIS_TIMEOUT:2000ms}
 
 management:
   endpoints:
