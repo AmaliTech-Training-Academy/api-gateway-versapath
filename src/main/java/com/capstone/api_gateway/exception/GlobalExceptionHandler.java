@@ -6,9 +6,6 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
-import java.util.List;
-import java.util.Map;
-
 @RestControllerAdvice
 public class GlobalExceptionHandler {
 
@@ -25,18 +22,6 @@ public class GlobalExceptionHandler {
         return new ResponseEntity<>(response, HttpStatus.INTERNAL_SERVER_ERROR);
     }
 
-    // handle session is not found exception response
-    @ExceptionHandler(SessionNotFoundException.class)
-    public ResponseEntity<?> handleSessionNotFound(
-            SessionNotFoundException exception) {
-        ResponseDto response = ResponseDto.builder()
-                .status(false)
-                .message(exception.getMessage())
-                .errors(null)
-                .data(null)
-                .build();
-        return new ResponseEntity<>(response, HttpStatus.NOT_FOUND);
-    }
     @ExceptionHandler(UnauthorizedException.class)
     public ResponseEntity<?> handleUnauthorizedException
             (UnauthorizedException exception) {
