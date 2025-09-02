@@ -16,7 +16,9 @@ import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.security.Keys;
 import org.springframework.beans.factory.annotation.Value;
 import lombok.extern.slf4j.Slf4j;
+import lombok.RequiredArgsConstructor;
 import com.capstone.api_gateway.dto.ApiResponseDto;
+import com.capstone.api_gateway.service.TokenBlacklistService;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
@@ -26,11 +28,13 @@ import java.nio.charset.StandardCharsets;
 
 @Component
 @Slf4j
+@RequiredArgsConstructor
 public class JwtFilter implements GlobalFilter, Ordered {
 
     @Value("${JWT_SECRET}")
     private String jwtSecret;
     
+    private final TokenBlacklistService tokenBlacklistService;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     @Override
@@ -47,7 +51,6 @@ public class JwtFilter implements GlobalFilter, Ordered {
         // Get Authorization header
         String authHeader = exchange.getRequest().getHeaders().getFirst("Authorization");
 
-        // If no Authorization header, let services decide if endpoint is public
         if (authHeader == null || !authHeader.startsWith("Bearer ")) {
             log.debug("No JWT token found for path: {} - delegating to service", path);
             return chain.filter(exchange);
@@ -70,22 +73,31 @@ public class JwtFilter implements GlobalFilter, Ordered {
                 return unauthorizedResponse(exchange);
             }
 
-            // Extract user information
-            String userId = claims.getSubject();
-            String role = claims.get("role", String.class);
-            String email = claims.get("email", String.class);
+            // Extract JTI and check blacklist
+            String jti = claims.getId();
+            return tokenBlacklistService.isTokenBlacklisted(jti)
+                    .flatMap(blacklisted -> {
+                        if (blacklisted) {
+                            log.warn("Rejected blacklisted token with JTI: {}", jti);
+                            return unauthorizedResponse(exchange);
+                        }
 
-            log.debug("JWT validated successfully - UserId: {}, Role: {}, Email: {}",
-                    userId, role, email);
+                        // Extract user information
+                        String userId = claims.getSubject();
+                        String role = claims.get("role", String.class);
+                        String email = claims.get("email", String.class);
 
-            // Add user context headers for downstream services
-            ServerHttpRequest mutatedRequest = exchange.getRequest().mutate()
-                    .header("X-User-Id", userId)
-                    .header("X-User-Role", role)
-                    .header("X-User-Email", email)
-                    .build();
+                        log.debug("JWT validated successfully - UserId: {}, Role: {}, Email: {}", userId, role, email);
 
-            return chain.filter(exchange.mutate().request(mutatedRequest).build());
+                        // Add user context headers
+                        ServerHttpRequest mutatedRequest = exchange.getRequest().mutate()
+                                .header("X-User-Id", userId)
+                                .header("X-User-Role", role)
+                                .header("X-User-Email", email)
+                                .build();
+
+                        return chain.filter(exchange.mutate().request(mutatedRequest).build());
+                    });
 
         } catch (ExpiredJwtException e) {
             log.warn("JWT token expired for path: {}", path);
@@ -95,6 +107,7 @@ public class JwtFilter implements GlobalFilter, Ordered {
             return unauthorizedResponse(exchange);
         }
     }
+
 
     /**
      * Only infrastructure-level endpoints that should skip JWT validation at gateway level
