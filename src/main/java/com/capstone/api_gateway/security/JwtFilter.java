@@ -6,9 +6,12 @@ import org.springframework.core.Ordered;
 import org.springframework.stereotype.Component;
 import org.springframework.web.server.ServerWebExchange;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.HttpCookie;
 import org.springframework.http.server.reactive.ServerHttpRequest;
 import org.springframework.http.server.reactive.ServerHttpResponse;
 import org.springframework.core.io.buffer.DataBuffer;
+import org.springframework.util.MultiValueMap;
+import org.springframework.util.StringUtils;
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.ExpiredJwtException;
 import io.jsonwebtoken.JwtException;
@@ -33,9 +36,11 @@ public class JwtFilter implements GlobalFilter, Ordered {
 
     @Value("${JWT_SECRET}")
     private String jwtSecret;
-    
+
     private final TokenBlacklistService tokenBlacklistService;
     private final ObjectMapper objectMapper = new ObjectMapper();
+
+    private static final String ACCESS_TOKEN_COOKIE_NAME = "accessToken";
 
     @Override
     public Mono<Void> filter(ServerWebExchange exchange, GatewayFilterChain chain) {
@@ -48,17 +53,15 @@ public class JwtFilter implements GlobalFilter, Ordered {
             return chain.filter(exchange);
         }
 
-        // Get Authorization header
-        String authHeader = exchange.getRequest().getHeaders().getFirst("Authorization");
+        // Extract JWT token (cookie first, then header fallback)
+        String jwt = getJwtFromRequest(exchange.getRequest());
 
-        if (authHeader == null || !authHeader.startsWith("Bearer ")) {
+        if (!StringUtils.hasText(jwt)) {
             log.debug("No JWT token found for path: {} - delegating to service", path);
             return chain.filter(exchange);
         }
 
         // JWT token present - validate it
-        String jwt = authHeader.substring(7);
-
         try {
             Claims claims = Jwts.parser()
                     .verifyWith(getSigningKey())
@@ -89,7 +92,7 @@ public class JwtFilter implements GlobalFilter, Ordered {
 
                         log.debug("JWT validated successfully - UserId: {}, Role: {}, Email: {}", userId, role, email);
 
-                        // Add user context headers
+                        // Add user context headers for downstream services
                         ServerHttpRequest mutatedRequest = exchange.getRequest().mutate()
                                 .header("X-User-Id", userId)
                                 .header("X-User-Role", role)
@@ -108,6 +111,30 @@ public class JwtFilter implements GlobalFilter, Ordered {
         }
     }
 
+    /**
+     * Extract JWT token from cookies first, then fallback to Authorization header
+     */
+    private String getJwtFromRequest(ServerHttpRequest request) {
+        // Try to get token from cookie
+        MultiValueMap<String, HttpCookie> cookies = request.getCookies();
+        if (cookies.containsKey(ACCESS_TOKEN_COOKIE_NAME)) {
+            HttpCookie accessTokenCookie = cookies.getFirst(ACCESS_TOKEN_COOKIE_NAME);
+            if (accessTokenCookie != null && StringUtils.hasText(accessTokenCookie.getValue())) {
+                log.debug("Access token found in cookie");
+                return accessTokenCookie.getValue();
+            }
+        }
+
+        // Fallback to Authorization header (for API clients)
+        String authHeader = request.getHeaders().getFirst("Authorization");
+        if (StringUtils.hasText(authHeader) && authHeader.startsWith("Bearer ")) {
+            log.debug("Access token found in Authorization header");
+            return authHeader.substring(7);
+        }
+
+        log.debug("No access token found in cookie or Authorization header");
+        return null;
+    }
 
     /**
      * Only infrastructure-level endpoints that should skip JWT validation at gateway level
@@ -130,8 +157,8 @@ public class JwtFilter implements GlobalFilter, Ordered {
         response.getHeaders().add("Content-Type", "application/json");
 
         ApiResponseDto<Void> errorResponse = ApiResponseDto.error(
-            "Invalid or missing authentication token",
-            "Authentication required"
+                "Invalid or missing authentication token",
+                "Authentication required"
         );
 
         try {
@@ -152,4 +179,3 @@ public class JwtFilter implements GlobalFilter, Ordered {
         return -1;
     }
 }
-
