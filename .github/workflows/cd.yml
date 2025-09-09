@@ -1,0 +1,128 @@
+name: CD api-gateway
+
+on:
+  push:
+    branches:
+      - dev
+      - staging
+      - production
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    name: Deploying api-gateway
+    runs-on: ubuntu-latest
+    env:
+      AWS_ECR_REPOSITORY_NAME: versapath/api-gateway
+      AWS_ECS_CLUSTER_NAME: versapath-cluster
+      AWS_ECS_SERVICE_NAME: versapath-api-gateway
+      AWS_DEFAULT_REGION: eu-west-1
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # - name: Set up JDK 21
+      #   uses: actions/setup-java@v4
+      #   with:
+      #     distribution: 'temurin'
+      #     java-version: '21'
+      #     cache: maven
+
+      # - run: |
+      #     curl -o settings.xml https://raw.githubusercontent.com/AmaliTech-Training-Academy/config-repository-versapath/refs/heads/dev/settings.xml
+      
+      # - name: Build with Maven
+      #   run: mvn -s settings.xml clean package -DskipTests
+      #   env:
+      #     GH_USER: ${{ secrets.COMMON_EVENT_DEP_GH_USER }}
+      #     GH_TOKEN: ${{ secrets.COMMON_EVENT_DEP_GH_TOKEN }}
+
+      - name: Set image tag
+        id: vars
+        run: echo "IMAGE_TAG=$(git rev-parse --short HEAD)" >> $GITHUB_ENV
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_DEFAULT_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build, tag, and push image to Amazon ECR
+        env:
+          REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          REPOSITORY: ${{ env.AWS_ECR_REPOSITORY_NAME }}
+        run: |
+          echo "Building Docker image..."
+          docker build -t $REGISTRY/$REPOSITORY:${{ env.IMAGE_TAG }} .
+          docker tag $REGISTRY/$REPOSITORY:${{ env.IMAGE_TAG }} $REGISTRY/$REPOSITORY:latest
+          echo "Pushing to ECR..."
+          docker push $REGISTRY/$REPOSITORY:${{ env.IMAGE_TAG }}
+          docker push $REGISTRY/$REPOSITORY:latest
+
+      # TERRAFORM-COMPATIBLE APPROACH: Only update image, preserve infrastructure config
+      - name: Update ECS Service with new image (Terraform-compatible)
+        run: |
+          echo "Updating ECS service with new image..."
+          
+          # Check if service exists and get current task definition
+          CURRENT_TASK_DEF=$(aws ecs describe-services \
+            --cluster ${{ env.AWS_ECS_CLUSTER_NAME }} \
+            --services ${{ env.AWS_ECS_SERVICE_NAME }} \
+            --query 'services[0].taskDefinition' \
+            --output text 2>/dev/null || echo "NONE")
+          
+          if [ "$CURRENT_TASK_DEF" != "NONE" ] && [ "$CURRENT_TASK_DEF" != "null" ]; then
+            echo "Using current AWS task definition: $CURRENT_TASK_DEF"
+            
+            # Get current task definition JSON from AWS
+            aws ecs describe-task-definition \
+              --task-definition $CURRENT_TASK_DEF \
+              --query 'taskDefinition' > current-task-def.json
+            
+            # Update image in the JSON while preserving all other configurations
+            NEW_IMAGE="${{ steps.login-ecr.outputs.registry }}/${{ env.AWS_ECR_REPOSITORY_NAME }}:${{ env.IMAGE_TAG }}"
+            jq --arg image "$NEW_IMAGE" '.containerDefinitions[0].image = $image' current-task-def.json > updated-task-def.json
+            
+            # Remove runtime-specific fields that shouldn't be in registration
+            jq 'del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .placementConstraints, .compatibilities, .registeredAt, .registeredBy)' updated-task-def.json > clean-task-def.json
+            
+          else
+            echo "No current task definition found in AWS, using local task definition as baseline"
+            
+            # Use our local updated task definition and update the image
+            NEW_IMAGE="${{ steps.login-ecr.outputs.registry }}/${{ env.AWS_ECR_REPOSITORY_NAME }}:${{ env.IMAGE_TAG }}"
+            jq --arg image "$NEW_IMAGE" '.containerDefinitions[0].image = $image' .aws/ecs-task-def.json > clean-task-def.json
+          fi
+          
+          # Register new task definition
+          NEW_TASK_DEF_ARN=$(aws ecs register-task-definition \
+            --cli-input-json file://clean-task-def.json \
+            --query 'taskDefinition.taskDefinitionArn' \
+            --output text)
+          
+          echo "New task definition registered: $NEW_TASK_DEF_ARN"
+          
+          # Update service to use new task definition  
+          aws ecs update-service \
+            --cluster ${{ env.AWS_ECS_CLUSTER_NAME }} \
+            --service ${{ env.AWS_ECS_SERVICE_NAME }} \
+            --task-definition $NEW_TASK_DEF_ARN
+          
+          echo "Service updated with new task definition"
+
+      - name: Wait for deployment to complete
+        run: |
+          echo "Waiting for service to stabilize..."
+          aws ecs wait services-stable \
+            --cluster ${{ env.AWS_ECS_CLUSTER_NAME }} \
+            --services ${{ env.AWS_ECS_SERVICE_NAME }}
+          echo "Deployment completed successfully!"
