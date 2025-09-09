@@ -22,21 +22,21 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up JDK 21
-        uses: actions/setup-java@v4
-        with:
-          distribution: 'temurin'
-          java-version: '21'
-          cache: maven
+      # - name: Set up JDK 21
+      #   uses: actions/setup-java@v4
+      #   with:
+      #     distribution: 'temurin'
+      #     java-version: '21'
+      #     cache: maven
 
-      - run: |
-          curl -o settings.xml https://raw.githubusercontent.com/AmaliTech-Training-Academy/config-repository-versapath/refs/heads/dev/settings.xml
+      # - run: |
+      #     curl -o settings.xml https://raw.githubusercontent.com/AmaliTech-Training-Academy/config-repository-versapath/refs/heads/dev/settings.xml
       
-      - name: Build with Maven
-        run: mvn -s settings.xml clean package -DskipTests
-        env:
-          GH_USER: ${{ secrets.COMMON_EVENT_DEP_GH_USER }}
-          GH_TOKEN: ${{ secrets.COMMON_EVENT_DEP_GH_TOKEN }}
+      # - name: Build with Maven
+      #   run: mvn -s settings.xml clean package -DskipTests
+      #   env:
+      #     GH_USER: ${{ secrets.COMMON_EVENT_DEP_GH_USER }}
+      #     GH_TOKEN: ${{ secrets.COMMON_EVENT_DEP_GH_TOKEN }}
 
       - name: Set image tag
         id: vars
