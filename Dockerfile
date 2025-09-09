@@ -20,8 +20,8 @@ FROM bellsoft/liberica-runtime-container:jre-21-slim-musl
 # Set the working directory inside the container
 WORKDIR /application
 
-# Copy the Jar file
-COPY target/*-SNAPSHOT.jar app.jar
+# Copy the built Jar file from the builder stage
+COPY --from=builder /build/target/*-SNAPSHOT.jar app.jar
 
 # Switch to non-root user
 USER apigateway
