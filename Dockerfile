@@ -1,3 +1,19 @@
+# Build stage: Compile the application
+FROM maven:3.9-eclipse-temurin-21 AS builder
+
+WORKDIR /build
+
+# Copy pom.xml first for better caching
+COPY pom.xml .
+# Download dependencies (will be cached if pom.xml doesn't change)
+RUN mvn dependency:go-offline -B
+
+# Copy source code
+COPY src ./src/
+
+# Build the application
+RUN mvn package -DskipTests
+
 # Use a lightweight base image with Java 21 JRE
 FROM bellsoft/liberica-runtime-container:jre-21-slim-musl
 
