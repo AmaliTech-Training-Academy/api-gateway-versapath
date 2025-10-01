@@ -14,7 +14,7 @@ public class GlobalExceptionHandler {
     public ResponseEntity<?> handleUnexpectedException
     (Exception exception) {
         ResponseDto response = ResponseDto.builder()
-                .status(false)
+                .success(false)
                 .message(exception.getMessage())
                 .errors(null)
                 .data(null)
@@ -26,7 +26,7 @@ public class GlobalExceptionHandler {
     public ResponseEntity<?> handleUnauthorizedException
             (UnauthorizedException exception) {
         ResponseDto response = ResponseDto.builder()
-                .status(false)
+                .success(false)
                 .message(exception.getMessage())
                 .errors(null)
                 .data(null)
@@ -38,7 +38,7 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(Error.class)
     public ResponseEntity<?> handleError(Error error) {
         ResponseDto response = ResponseDto.builder()
-                .status(false)
+                .success(false)
                 .message(error.getMessage())
                 .errors(null)
                 .data(null)
