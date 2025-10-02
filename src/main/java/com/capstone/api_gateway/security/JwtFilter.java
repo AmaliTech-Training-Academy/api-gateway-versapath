@@ -5,11 +5,8 @@ import org.springframework.cloud.gateway.filter.GlobalFilter;
 import org.springframework.core.Ordered;
 import org.springframework.stereotype.Component;
 import org.springframework.web.server.ServerWebExchange;
-import org.springframework.http.HttpStatus;
 import org.springframework.http.HttpCookie;
 import org.springframework.http.server.reactive.ServerHttpRequest;
-import org.springframework.http.server.reactive.ServerHttpResponse;
-import org.springframework.core.io.buffer.DataBuffer;
 import org.springframework.util.MultiValueMap;
 import org.springframework.util.StringUtils;
 import io.jsonwebtoken.Claims;
@@ -20,14 +17,10 @@ import io.jsonwebtoken.security.Keys;
 import org.springframework.beans.factory.annotation.Value;
 import lombok.extern.slf4j.Slf4j;
 import lombok.RequiredArgsConstructor;
-import com.capstone.api_gateway.dto.ApiResponseDto;
 import com.capstone.api_gateway.service.TokenBlacklistService;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
 
 import reactor.core.publisher.Mono;
 import javax.crypto.SecretKey;
-import java.nio.charset.StandardCharsets;
 
 @Component
 @Slf4j
@@ -38,7 +31,6 @@ public class JwtFilter implements GlobalFilter, Ordered {
     private String jwtSecret;
 
     private final TokenBlacklistService tokenBlacklistService;
-    private final ObjectMapper objectMapper = new ObjectMapper();
 
     private static final String ACCESS_TOKEN_COOKIE_NAME = "accessToken";
 
@@ -50,7 +42,7 @@ public class JwtFilter implements GlobalFilter, Ordered {
         // Skip JWT validation only for infrastructure endpoints
         if (isInfrastructureEndpoint(path)) {
             log.debug("Skipping JWT validation for infrastructure endpoint: {}", path);
-            return chain.filter(exchange);
+            return chain.filter(getSanitizedAuthExchange(exchange));
         }
 
         // Extract JWT token (cookie first, then header fallback)
@@ -58,7 +50,7 @@ public class JwtFilter implements GlobalFilter, Ordered {
 
         if (!StringUtils.hasText(jwt)) {
             log.debug("No JWT token found for path: {} - delegating to service", path);
-            return chain.filter(exchange);
+            return chain.filter(getSanitizedAuthExchange(exchange));
         }
 
         // JWT token present - validate it
@@ -73,7 +65,7 @@ public class JwtFilter implements GlobalFilter, Ordered {
             String tokenType = claims.get("type", String.class);
             if (!"ACCESS".equals(tokenType)) {
                 log.warn("Invalid token type: {} for path: {}", tokenType, path);
-                return unauthorizedResponse(exchange);
+                return chain.filter(getSanitizedAuthExchange(exchange));
             }
 
             // Extract JTI and check blacklist
@@ -82,7 +74,7 @@ public class JwtFilter implements GlobalFilter, Ordered {
                     .flatMap(blacklisted -> {
                         if (blacklisted) {
                             log.warn("Rejected blacklisted token with JTI: {}", jti);
-                            return unauthorizedResponse(exchange);
+                            return chain.filter(getSanitizedAuthExchange(exchange));
                         }
 
                         // Extract user information
@@ -104,10 +96,11 @@ public class JwtFilter implements GlobalFilter, Ordered {
 
         } catch (ExpiredJwtException e) {
             log.warn("JWT token expired for path: {}", path);
-            return unauthorizedResponse(exchange);
+            return chain.filter(getSanitizedAuthExchange(exchange));
         } catch (JwtException e) {
             log.error("JWT validation failed for path: {}: {}", path, e.getMessage());
-            return unauthorizedResponse(exchange);
+
+            return chain.filter(getSanitizedAuthExchange(exchange));
         }
     }
 
@@ -151,27 +144,16 @@ public class JwtFilter implements GlobalFilter, Ordered {
         return Keys.hmacShaKeyFor(jwtSecret.getBytes());
     }
 
-    private Mono<Void> unauthorizedResponse(ServerWebExchange exchange) {
-        ServerHttpResponse response = exchange.getResponse();
-        response.setStatusCode(HttpStatus.UNAUTHORIZED);
-        response.getHeaders().add("Content-Type", "application/json");
-
-        ApiResponseDto<Void> errorResponse = ApiResponseDto.error(
-                "Invalid or missing authentication token",
-                "Authentication required"
-        );
-
-        try {
-            String body = objectMapper.writeValueAsString(errorResponse);
-            DataBuffer buffer = response.bufferFactory().wrap(body.getBytes(StandardCharsets.UTF_8));
-            return response.writeWith(Mono.just(buffer));
-        } catch (JsonProcessingException e) {
-            log.error("Error serializing unauthorized response: {}", e.getMessage());
-            // Fallback to simple response
-            String fallbackBody = "{\"success\":false,\"message\":\"Authentication required\"}";
-            DataBuffer buffer = response.bufferFactory().wrap(fallbackBody.getBytes(StandardCharsets.UTF_8));
-            return response.writeWith(Mono.just(buffer));
-        }
+    private ServerWebExchange getSanitizedAuthExchange(ServerWebExchange exchange) {
+        ServerHttpRequest mutatedRequest = exchange.getRequest().mutate()
+                .headers(h -> {
+                    h.remove("X-User-Id");
+                    h.remove("X-User-Role");
+                    h.remove("X-User-Email");
+                })
+                .build();
+        log.info("Sanitized request headers: {}", mutatedRequest.getHeaders());
+        return exchange.mutate().request(mutatedRequest).build();
     }
 
     @Override
